@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
@@ -48,8 +49,13 @@ async function waitForHttpOk(url, timeoutMs) {
   throw lastError || new Error(`Timed out waiting for ${url}`);
 }
 
+// A child killed by a signal has exitCode === null and signalCode set, so check both.
+function hasExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 async function stopChild(child) {
-  if (!child || child.exitCode !== null) {
+  if (!child || hasExited(child)) {
     return;
   }
 
@@ -60,7 +66,7 @@ async function stopChild(child) {
     new Promise((resolve) => setTimeout(resolve, 1500)),
   ]);
 
-  if (child.exitCode === null) {
+  if (!hasExited(child)) {
     if (process.platform === 'win32') {
       const killer = spawn('taskkill', ['/pid', String(child.pid), '/f', '/t'], {
         stdio: 'ignore',
@@ -88,8 +94,10 @@ test('bundled server package metadata, health, and web ui', (_, done) => {
     assert.ok(fs.existsSync(path.join(bundledWebUiRoot, 'index.html')), 'Bundled web-ui runtime is missing');
 
     const port = await getFreePort();
-    const tmpRoot = path.join(extensionRoot, '.tmp-runtime-test');
-    const appDir = path.join(tmpRoot, `app-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    // Keep runtime artifacts (db, agent.sock) out of the extension root so a leftover
+    // socket can never break `vsce package`.
+    const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'acb-runtime-test-'));
+    const appDir = path.join(tmpRoot, 'app');
     const dbPath = path.join(appDir, 'bus.db');
     const configPath = path.join(appDir, 'config.json');
 
@@ -120,6 +128,9 @@ test('bundled server package metadata, health, and web ui', (_, done) => {
       stderr += chunk.toString();
     });
 
+    // Report only after cleanup: calling done() first lets the runner exit before
+    // the child is stopped and tmpRoot is removed.
+    let failure;
     try {
       const healthResponse = await waitForHttpOk(`http://127.0.0.1:${port}/health`, 8000);
       const healthPayload = await healthResponse.json();
@@ -130,12 +141,12 @@ test('bundled server package metadata, health, and web ui', (_, done) => {
       assert.match(staticHtml, /AgentChatBus/i);
 
       assert.match(stdout, /serve mode listening on 127\.0\.0\.1:/);
-      done();
     } catch (error) {
-      done(error instanceof Error ? error : new Error(String(error)));
+      failure = error instanceof Error ? error : new Error(String(error));
     } finally {
       await stopChild(child);
       await fsp.rm(tmpRoot, { recursive: true, force: true });
     }
+    done(failure);
   })().catch(done);
 });
