@@ -32,3 +32,11 @@ git merge main                      # 长期分支使用 merge，保留历史
 - 不要对 `main` 或 `upstream/*` 执行 force push、reset 等改写历史的操作。
 - 提交和推送只在用户明确要求时进行。
 - 不要向 `Killea/AgentChatBus` 提交 PR，除非用户明确要求。
+- 不要提交 `vscode-agentchatbus/out/` 下的改动：这是上游在发布时提交的构建产物，每次构建都会被重写。构建后如有改动，用 `git checkout -- vscode-agentchatbus/out` 还原。
+
+## 构建与安装自研扩展
+
+- 使用仓库根目录的 `./install-fork.sh`：打包 VSIX（不改版本号），用 `--force` 覆盖安装到 `code` / `cursor` / `code-insiders`，并自动还原 `out/`。`--skip-build` 只安装已有的 VSIX。
+- 扩展 ID 和版本号与上游保持一致，因此会覆盖市场版本，而不是并存。不要修改 `publisher` / `name` / `version`。
+- 构建时会把 Git 提交号写进扩展，状态面板和 “AgentChatBus Server” 输出中显示为 `0.2.46 (dev@<commit>)`；有未提交改动时带 `+dirty`。
+- 安装后需在扩展视图中关闭该扩展的自动更新，否则上游发布新版本时会覆盖自研版本。

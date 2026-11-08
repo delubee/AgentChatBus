@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,7 +13,24 @@ const extensionRoot = path.resolve(__dirname, '..');
 const outDir = path.join(extensionRoot, 'out');
 const watchMode = process.argv.includes('--watch');
 
+function git(args) {
+  try {
+    return execFileSync('git', args, { cwd: extensionRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
+}
+
+// Read by src/buildInfo.ts to tell fork builds apart from marketplace releases.
+// out/ is excluded from the dirty check because it is tracked build output that every build rewrites.
+const buildInfo = {
+  commit: git(['rev-parse', '--short', 'HEAD']),
+  branch: git(['rev-parse', '--abbrev-ref', 'HEAD']).replace(/^HEAD$/, ''),
+  dirty: git(['status', '--porcelain', '--', ':(top)', ':(top,exclude)vscode-agentchatbus/out']) !== '',
+};
+
 const buildOptions = {
+  define: { __ACB_BUILD_INFO__: JSON.stringify(buildInfo) },
   absWorkingDir: extensionRoot,
   bundle: true,
   format: 'cjs',
@@ -66,6 +84,7 @@ async function main() {
     await build(options);
   }
   console.log('[build:extension] bundled extension host and test-compatible helpers into out/');
+  console.log(`[build:extension] build info: ${JSON.stringify(buildInfo)}`);
 }
 
 main().catch((error) => {

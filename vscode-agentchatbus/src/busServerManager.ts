@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as child_process from 'child_process';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
+import { withBuildLabel } from './buildInfo';
 import { SetupProvider } from './providers/setupProvider';
 import { McpLogProvider } from './providers/mcpLogProvider';
 import {
@@ -97,9 +98,10 @@ export class BusServerManager {
         this.extensionRoot = context.extensionPath;
         this.globalStoragePath = context.globalStorageUri.fsPath;
         this.hostNodeExecutable = process.execPath;
-        this.extensionVersion = String(context.extension.packageJSON?.version || 'unknown');
+        this.extensionVersion = withBuildLabel(String(context.extension.packageJSON?.version || 'unknown'));
         this.ensureServerRunningSingleFlight = createSingleFlightRunner(() => this.ensureServerRunningInternal());
         this.outputChannel = vscode.window.createOutputChannel('AgentChatBus Server');
+        this.outputChannel.appendLine(`AgentChatBus extension ${this.extensionVersion}`);
         void vscode.commands.executeCommand('setContext', 'agentchatbus:serverStopping', false);
         this.updateRestartContexts();
     }
