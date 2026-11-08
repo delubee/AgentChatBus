@@ -1119,6 +1119,79 @@ describe('Bus Connect Parity Tests', () => {
         expect(edited.version).toBe(1);
     }, 10000);
 
+    it('shared MCP session requires explicit credentials instead of using the last connected agent', async () => {
+        const sessionId = "shared-session-" + randomUUID().slice(0, 8);
+        const threadName = "Shared Session Thread-" + randomUUID().slice(0, 8);
+        const first = await callMcpTool('bus_connect', {
+            thread_name: threadName,
+            ide: "VS Code",
+            model: "Model A"
+        }, sessionId);
+        expect(first.connection_notice).toBeUndefined();
+
+        const second = await callMcpTool('bus_connect', {
+            thread_name: threadName,
+            ide: "VS Code",
+            model: "Model B"
+        }, sessionId);
+        expect(second.agent.agent_id).not.toBe(first.agent.agent_id);
+        expect(second.connection_notice).toContain("agent_id and token");
+
+        // Without explicit credentials the caller is ambiguous, so the server must refuse.
+        const implicitWait = await callMcpTool('msg_wait', {
+            thread_id: first.thread.thread_id,
+            after_seq: first.current_seq,
+            timeout_ms: 100
+        }, sessionId);
+        expect(implicitWait.error).toBe("SharedConnection");
+
+        // The first agent can still wait and post with its own credentials.
+        const explicitWait = await callMcpTool('msg_wait', {
+            thread_id: first.thread.thread_id,
+            after_seq: 0,
+            agent_id: first.agent.agent_id,
+            token: first.agent.token,
+            timeout_ms: 100
+        }, sessionId);
+        expect(explicitWait.error).toBeUndefined();
+
+        const posted = await callMcpTool('msg_post', {
+            thread_id: first.thread.thread_id,
+            author: first.agent.agent_id,
+            content: "first agent still works on a shared session",
+            expected_last_seq: explicitWait.current_seq,
+            reply_token: explicitWait.reply_token,
+            role: "assistant"
+        }, sessionId);
+        expect(posted.msg_id).toBeTruthy();
+
+        const implicitEdit = await callMcpTool('msg_edit', {
+            message_id: posted.msg_id,
+            new_content: "should be rejected"
+        }, sessionId);
+        expect(implicitEdit.error).toBe("AUTHENTICATION_REQUIRED");
+    }, 10000);
+
+    it('reconnecting the same agent on a session keeps implicit credentials working', async () => {
+        const sessionId = "resume-session-" + randomUUID().slice(0, 8);
+        const threadName = "Resume Session Thread-" + randomUUID().slice(0, 8);
+        const first = await callMcpTool('bus_connect', { thread_name: threadName }, sessionId);
+        const resumed = await callMcpTool('bus_connect', {
+            thread_name: threadName,
+            agent_id: first.agent.agent_id,
+            token: first.agent.token
+        }, sessionId);
+        expect(resumed.agent.agent_id).toBe(first.agent.agent_id);
+        expect(resumed.connection_notice).toBeUndefined();
+
+        const wait = await callMcpTool('msg_wait', {
+            thread_id: first.thread.thread_id,
+            after_seq: 0,
+            timeout_ms: 100
+        }, sessionId);
+        expect(wait.error).toBeUndefined();
+    }, 10000);
+
     it('bus_connect matches Python token formats and blank ide/model fallback', async () => {
         const payload = await callMcpTool('bus_connect', {
             thread_name: "Blank Agent Fields-" + randomUUID().slice(0, 8),

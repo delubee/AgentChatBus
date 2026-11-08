@@ -347,8 +347,8 @@ const toolDefinitions: ToolDefinition[] = [
             "Max wait in milliseconds. Server may enforce a minimum timeout for blocking waits; quick-return recovery paths are unaffected."
         },
         return_format: { type: "string", enum: ["json", "blocks"], default: "blocks", description: "Return format for tool result content. 'blocks' returns native MCP content blocks (TextContent/ImageContent...). 'json' returns a single JSON-encoded text payload (legacy)." },
-        agent_id: { type: "string", description: "Optional: your agent ID for activity tracking." },
-        token: { type: "string", description: "Optional: your agent token for verification." },
+        agent_id: { type: "string", description: "Optional: your agent ID for activity tracking. Required when the MCP connection is shared by several agents." },
+        token: { type: "string", description: "Optional: your agent token for verification. Required when the MCP connection is shared by several agents." },
         for_agent: { type: "string", description: "Only return messages where metadata.handoff_target matches this agent ID. Useful for directed handoff routing." },
         include_attachments: { type: "boolean", default: true, description: "If false, omit image/attachment content from blocks format (text-only). Reduces payload size when images are not needed." }
       }
@@ -684,7 +684,14 @@ type ToolCallContext = {
 };
 
 const toolCallContext = new AsyncLocalStorage<ToolCallContext>();
-const connectionAgents = new Map<string, { agentId: string; token: string }>();
+// knownAgentIds tracks every agent bound to the session. Some MCP hosts (e.g. several
+// chat windows in one VS Code instance) share a single session, so the "current" agent
+// is only trustworthy while exactly one agent has ever been bound to it.
+const connectionAgents = new Map<string, { agentId: string; token: string; knownAgentIds: Set<string> }>();
+
+const SHARED_CONNECTION_DETAIL =
+  "This MCP connection is shared by multiple agents, so the caller cannot be inferred. " +
+  "Pass your own agent_id and token (returned by bus_connect) explicitly.";
 
 function getMsgWaitUploadsRoots(): string[] {
   const cwd = process.cwd();
@@ -742,21 +749,31 @@ function serializeFilteredMetadata(
   return filtered ? JSON.stringify(filtered) : null;
 }
 
-function getConnectionAgent(): { agentId?: string; token?: string } {
+function getConnectionAgent(): { agentId?: string; token?: string; shared?: boolean } {
   const sessionId = toolCallContext.getStore()?.sessionId;
   if (!sessionId) {
     return {};
   }
   const entry = connectionAgents.get(sessionId);
-  return entry ? { agentId: entry.agentId, token: entry.token } : {};
+  if (!entry) {
+    return {};
+  }
+  if (entry.knownAgentIds.size > 1) {
+    return { shared: true };
+  }
+  return { agentId: entry.agentId, token: entry.token };
 }
 
-function setConnectionAgent(agentId: string, token: string): void {
+/** Binds the agent to the current session; returns true if the session is shared by several agents. */
+function setConnectionAgent(agentId: string, token: string): boolean {
   const sessionId = toolCallContext.getStore()?.sessionId;
   if (!sessionId) {
-    return;
+    return false;
   }
-  connectionAgents.set(sessionId, { agentId, token });
+  const knownAgentIds = connectionAgents.get(sessionId)?.knownAgentIds ?? new Set<string>();
+  knownAgentIds.add(agentId);
+  connectionAgents.set(sessionId, { agentId, token, knownAgentIds });
+  return knownAgentIds.size > 1;
 }
 
 function getToolAbortSignal(): AbortSignal | undefined {
@@ -1442,7 +1459,7 @@ export async function callTool(name: string, args: Record<string, unknown>): Pro
       const returnFormat = typeof args.return_format === "string" ? args.return_format : "blocks";
       const includeAttachments = typeof args.include_attachments === "boolean" ? args.include_attachments : true;
 
-      const { agentId: connectionAgentId, token: connectionToken } = getConnectionAgent();
+      const { agentId: connectionAgentId, token: connectionToken, shared: connectionShared } = getConnectionAgent();
       const explicitCredsSupplied = explicitAgentId !== undefined || explicitToken !== undefined;
       if (explicitCredsSupplied && (!explicitAgentId || !explicitToken)) {
         return [{
@@ -1451,6 +1468,12 @@ export async function callTool(name: string, args: Record<string, unknown>): Pro
             error: "InvalidCredentials",
             detail: "msg_wait requires both agent_id and token when explicit credentials are supplied.",
           })
+        }];
+      }
+      if (!explicitCredsSupplied && connectionShared) {
+        return [{
+          type: "text",
+          text: JSON.stringify({ error: "SharedConnection", detail: SHARED_CONNECTION_DETAIL })
         }];
       }
 
@@ -1949,7 +1972,7 @@ export async function callTool(name: string, args: Record<string, unknown>): Pro
           emoji: busConnectEmoji || undefined
         });
       }
-      setConnectionAgent(agent.id, agent.token as string);
+      const connectionShared = setConnectionAgent(agent.id, agent.token as string);
 
       // Phase 2: Find or Create Thread
       let thread = threadIdArg ? getStore().getThread(threadIdArg) : getStore().getThreadByTopic(threadName);
@@ -2030,7 +2053,8 @@ export async function callTool(name: string, args: Record<string, unknown>): Pro
         })),
         current_seq: sync.current_seq,
         reply_token: sync.reply_token,
-        reply_window: sync.reply_window
+        reply_window: sync.reply_window,
+        ...(connectionShared ? { connection_notice: SHARED_CONNECTION_DETAIL } : {})
       };
       return [{ type: "text", text: JSON.stringify(payload) }];
     }
@@ -2107,10 +2131,13 @@ export async function callTool(name: string, args: Record<string, unknown>): Pro
       const explicitAgentId = typeof args.agent_id === "string" ? args.agent_id : undefined;
       const explicitToken = typeof args.token === "string" ? args.token : undefined;
       const explicitCredsSupplied = explicitAgentId !== undefined || explicitToken !== undefined;
-      const { agentId: connectionAgentId, token: connectionToken } = getConnectionAgent();
+      const { agentId: connectionAgentId, token: connectionToken, shared: connectionShared } = getConnectionAgent();
       const agentId = explicitCredsSupplied ? explicitAgentId || "" : connectionAgentId || "";
       const token = explicitCredsSupplied ? explicitToken || "" : connectionToken || "";
 
+      if (!explicitCredsSupplied && connectionShared) {
+        return { error: "AUTHENTICATION_REQUIRED", detail: SHARED_CONNECTION_DETAIL };
+      }
       if (!agentId || !token) {
         return {
           error: "AUTHENTICATION_REQUIRED",
