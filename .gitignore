@@ -82,9 +82,7 @@ vscode-agentchatbus/.vscode-test/
 *temp*
 
 /agent-customization
-AGENTS.md
 .history/
-CLAUDE.md
 .serena/
 .cursorignore
 .cursorindexingignore
