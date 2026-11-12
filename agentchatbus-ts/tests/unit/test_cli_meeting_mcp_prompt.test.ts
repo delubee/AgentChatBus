@@ -26,10 +26,11 @@ describe("buildCliMcpMeetingPrompt", () => {
       participantRole: "administrator",
     }).prompt;
 
-    expect(prompt).toContain("Do not call `agent_register`.");
-    expect(prompt).toContain(`"thread_id": "${thread.id}"`);
+    // The payload identifies the thread by name; the thread id is only offered as a fallback.
+    expect(prompt).toContain("Call `bus_connect` with exactly this payload:");
+    expect(prompt).toContain(`"thread_name": "Prompt Thread"`);
     expect(prompt).toContain(`"agent_id": "${participant.id}"`);
     expect(prompt).toContain(`"token": "${participant.token}"`);
-    expect(prompt).toContain("Call `bus_connect` exactly once with this input:");
+    expect(prompt).toContain(`thread_id "${thread.id}"`);
   });
 });

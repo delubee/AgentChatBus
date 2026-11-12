@@ -324,7 +324,7 @@ describe("CliMeetingOrchestrator agent_mcp wake handling", () => {
 
     expect(store.getAgentWaitStatus(thread.id, agentA.id).is_waiting).toBe(false);
     expect(fakeManager.wakeCalls).toHaveLength(1);
-    expect(fakeManager.wakeCalls[0]?.prompt).toContain("Please use msg_wait");
+    expect(fakeManager.wakeCalls[0]?.prompt).toContain("resume the existing thread with plain thread-level `msg_wait`");
 
     orchestrator.close();
   });
@@ -403,7 +403,7 @@ describe("CliMeetingOrchestrator agent_mcp wake handling", () => {
     expect(store.getAgentWaitStatus(thread.id, agentA.id).is_waiting).toBe(false);
     expect(fakeManager.wakeCalls).toHaveLength(1);
     expect(fakeManager.wakeCalls[0]?.sessionId).toBe("session-a");
-    expect(fakeManager.wakeCalls[0]?.prompt).toContain("Please use msg_wait");
+    expect(fakeManager.wakeCalls[0]?.prompt).toContain("resume the existing thread with plain thread-level `msg_wait`");
 
     orchestrator.close();
   });
@@ -453,7 +453,7 @@ describe("CliMeetingOrchestrator agent_mcp wake handling", () => {
 
     await vi.advanceTimersByTimeAsync(1_200);
     expect(fakeManager.wakeCalls).toHaveLength(1);
-    expect(fakeManager.wakeCalls[0]?.prompt).toContain("prefer to use msg_post");
+    expect(fakeManager.wakeCalls[0]?.prompt).toContain("use `msg_post` to share them in the thread");
 
     orchestrator.close();
   });

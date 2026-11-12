@@ -139,7 +139,8 @@ describe("parseClaudeDirectResult", () => {
       "{\"type\":\"stream_event\",\"session_id\":\"claude-session-9\",\"uuid\":\"evt-2\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\\\"node --check web-ui/js/shared-chat.js\\\",\\\"cwd\\\":\\\"C:/repo\\\"\"}}}",
     ].join("\n"));
 
-    const toolEvent = collected.activities.find((event) => event.item_id === "tool:tool-9");
+    // The first event is emitted at content_block_start, before any input has streamed in.
+    const toolEvent = collected.activities.filter((event) => event.item_id === "tool:tool-9").at(-1);
     expect(toolEvent).toMatchObject({
       kind: "command_execution",
       status: "in_progress",

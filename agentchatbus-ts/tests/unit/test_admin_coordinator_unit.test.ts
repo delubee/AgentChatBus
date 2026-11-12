@@ -358,7 +358,9 @@ describe('Admin Coordinator Unit Tests (Ported from Python)', () => {
       const settings = store.getThreadSettings(thread.id);
       const messages = store.getMessages(thread.id, 0, false);
       const transcript = store.getHumanTranscript(thread.id, 0, false);
-      const noticeMessages = messages.filter(
+      // The timeout notice is human_only, so it is hidden from agent-facing messages and
+      // only appears in the human transcript.
+      const noticeMessages = transcript.filter(
         (message) => message.metadata?.ui_type === 'admin_coordination_timeout_notice'
       );
       const instructionMessages = messages.filter(
