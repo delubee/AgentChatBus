@@ -75,6 +75,18 @@ function extractString(value: Record<string, unknown>, keys: string[]): string |
   return undefined;
 }
 
+// Streamed message chunks carry meaningful edge whitespace (e.g. "Hello from "), so text
+// extraction keeps it; callers trim only the fully assembled result.
+function extractText(value: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 function extractJsonRpcId(value: unknown): JsonRpcId | undefined {
   return typeof value === "string" || typeof value === "number" ? value : undefined;
 }
@@ -134,12 +146,12 @@ async function waitForCopilotPromptCancellationMarker(
 
 function extractTextContent(value: unknown): string | undefined {
   if (typeof value === "string") {
-    return value.trim() || undefined;
+    return value.trim() ? value : undefined;
   }
   if (!isRecord(value)) {
     return undefined;
   }
-  return extractString(value, ["text", "content", "delta", "message", "result"]);
+  return extractText(value, ["text", "content", "delta", "message", "result"]);
 }
 
 function extractContentText(content: unknown): string | undefined {
@@ -148,7 +160,7 @@ function extractContentText(content: unknown): string | undefined {
       .map((entry) => extractTextContent(entry))
       .filter((entry): entry is string => Boolean(entry))
       .join("");
-    return merged.trim() || undefined;
+    return merged.trim() ? merged : undefined;
   }
   return extractTextContent(content);
 }
@@ -157,7 +169,7 @@ function extractAssistantText(value: unknown): string | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
-  return extractString(value, ["text", "delta", "message", "content", "result"])
+  return extractText(value, ["text", "delta", "message", "content", "result"])
     || extractContentText(value.content);
 }
 
@@ -317,11 +329,13 @@ function parseCopilotDirectJsonRpcLine(
     || extractRequestId(updateRecord)
     || extractRequestId(parsed);
 
-  const nextText = (updateType === "agent_message_chunk" ? extractContentText(updateRecord?.content) : undefined)
+  // Error notifications and responses carry their text in `message`; it belongs in `errors`.
+  const isErrorLine = method.includes("error") || (parsed.error !== undefined && parsed.error !== null);
+  const nextText = isErrorLine ? undefined : ((updateType === "agent_message_chunk" ? extractContentText(updateRecord?.content) : undefined)
     || extractAssistantText(updateRecord)
     || extractAssistantText(paramsRecord)
     || extractAssistantText(resultRecord)
-    || (method.includes("message") || method.includes("delta") ? extractAssistantText(parsed) : undefined);
+    || (method.includes("message") || method.includes("delta") ? extractAssistantText(parsed) : undefined));
   if (nextText) {
     state.assistantText = `${state.assistantText}${nextText}`;
   }

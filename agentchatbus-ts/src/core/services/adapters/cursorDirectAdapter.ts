@@ -118,6 +118,18 @@ function extractString(value: Record<string, unknown>, keys: string[]): string |
   return undefined;
 }
 
+// Streamed message chunks carry meaningful edge whitespace (e.g. "Hello from "), so text
+// extraction keeps it; callers trim only the fully assembled result.
+function extractText(value: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 function extractJsonRpcId(value: unknown): JsonRpcId | undefined {
   if (typeof value === "string" || typeof value === "number") {
     return value;
@@ -168,7 +180,7 @@ function extractAssistantText(value: unknown): string | undefined {
     return undefined;
   }
 
-  const direct = extractString(value, ["text", "delta", "message", "content", "result"]);
+  const direct = extractText(value, ["text", "delta", "message", "content", "result"]);
   if (direct) {
     return direct;
   }
@@ -177,10 +189,10 @@ function extractAssistantText(value: unknown): string | undefined {
   if (Array.isArray(content)) {
     const merged = content
       .filter(isRecord)
-      .map((entry) => extractString(entry, ["text", "delta", "content"]))
+      .map((entry) => extractText(entry, ["text", "delta", "content"]))
       .filter((entry): entry is string => Boolean(entry))
       .join("");
-    return merged.trim() || undefined;
+    return merged.trim() ? merged : undefined;
   }
 
   return undefined;
@@ -188,12 +200,12 @@ function extractAssistantText(value: unknown): string | undefined {
 
 function extractTextContent(value: unknown): string | undefined {
   if (typeof value === "string") {
-    return value.trim() || undefined;
+    return value.trim() ? value : undefined;
   }
   if (!isRecord(value)) {
     return undefined;
   }
-  return extractString(value, ["text", "content", "delta", "message", "result"]);
+  return extractText(value, ["text", "content", "delta", "message", "result"]);
 }
 
 function extractContentText(content: unknown): string | undefined {
@@ -202,7 +214,7 @@ function extractContentText(content: unknown): string | undefined {
       .map((entry) => extractTextContent(entry))
       .filter((entry): entry is string => Boolean(entry))
       .join("");
-    return merged.trim() || undefined;
+    return merged.trim() ? merged : undefined;
   }
   return extractTextContent(content);
 }
@@ -598,10 +610,12 @@ function parseCursorDirectJsonRpcLine(
   const updateRecord = paramsRecord && isRecord(paramsRecord.update) ? paramsRecord.update : undefined;
 
   const updateType = String(updateRecord?.sessionUpdate || updateRecord?.updateType || "").trim().toLowerCase();
-  const nextText = (updateType === "agent_message_chunk" ? extractContentText(updateRecord?.content) : undefined)
+  // Error notifications and responses carry their text in `message`; it belongs in `errors`.
+  const isErrorLine = method.includes("error") || (parsed.error !== undefined && parsed.error !== null);
+  const nextText = isErrorLine ? undefined : ((updateType === "agent_message_chunk" ? extractContentText(updateRecord?.content) : undefined)
     || extractAssistantText(paramsRecord)
     || extractAssistantText(resultRecord)
-    || (method.includes("message") || method.includes("delta") ? extractAssistantText(parsed) : undefined);
+    || (method.includes("message") || method.includes("delta") ? extractAssistantText(parsed) : undefined));
   if (nextText) {
     state.assistantText = `${state.assistantText}${nextText}`;
   }

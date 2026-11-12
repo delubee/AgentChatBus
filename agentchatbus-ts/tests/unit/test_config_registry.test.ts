@@ -50,7 +50,9 @@ describe("config registry coverage", () => {
         continue;
       }
       const normalized = relative(SRC_DIR, file).replace(/\\/g, "/");
-      if (normalized !== "core/config/registry.ts") {
+      // mcpProxy.ts is a standalone child-process script (shipped as mcpProxy.mjs) that must
+      // not import the registry, so it reads its launch env directly.
+      if (normalized !== "core/config/registry.ts" && normalized !== "transports/stdio/mcpProxy.ts") {
         offenders.push(normalized);
       }
     }

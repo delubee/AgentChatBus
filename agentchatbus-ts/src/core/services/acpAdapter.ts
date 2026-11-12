@@ -266,12 +266,12 @@ export class AcpAdapter implements CliSessionAdapter {
     // agentchatbus entry in their config file before spawning. In v2 mode this
     // writes a stdio proxy command (no IP/port); in v1 mode it writes the URL.
     if (this.agentConfig.mcpConfigPath) {
+      const cfg = getConfig();
       const baseUrl = String(
         input.env?.AGENTCHATBUS_BASE_URL ||
-          process.env.AGENTCHATBUS_BASE_URL ||
+          cfg.launchBaseUrl ||
           "",
       ).trim();
-      const cfg = getConfig();
       if (cfg.agentTransport === "v2-socket") {
         const sockPath = getAgentSocketPath();
         const proxyScript = resolveAcpSocketProxyScript();
@@ -437,8 +437,8 @@ export class AcpAdapter implements CliSessionAdapter {
           // context.
           // For agents without pre-configured MCP, we also provide a stdio MCP
           // proxy as a fallback.
-          const baseUrl = String(input.env?.AGENTCHATBUS_BASE_URL || process.env.AGENTCHATBUS_BASE_URL || "").trim();
           const cfg = getConfig();
+          const baseUrl = String(input.env?.AGENTCHATBUS_BASE_URL || cfg.launchBaseUrl || "").trim();
           const mcpServers: acp.McpServer[] = [];
           const useV2 = cfg.agentTransport === "v2-socket";
           const proxyScript = useV2

@@ -1713,9 +1713,24 @@ export function buildNativeActivityCard(snapshot: CliSessionSnapshot): CliNative
 
   const sortedSections = sortNativeCardSections(sections, primaryActiveKind);
   const contentBlocks = buildNativeActivityBlocks(snapshot);
-  const finalizedBlocks = contentBlocks.length
+  // The UI renders blocks whenever any exist, so a running task with no activity events yet
+  // must surface its synthesized Thinking section as a block instead of the idle placeholder.
+  const fallbackThinking = sortedSections.find(
+    (section) => section.kind === "thinking" && section.status === "in_progress",
+  );
+  const finalizedBlocks: CliNativeActivityCardBlock[] = contentBlocks.length
     ? contentBlocks
-    : [{
+    : fallbackThinking
+      ? [{
+        id: "thinking",
+        kind: "thinking" as const,
+        status: "in_progress" as const,
+        updated_at: pickNativeCardUpdatedAt(snapshot, sortedSections),
+        title: "Thinking",
+        summary: fallbackThinking.summary,
+        meta: fallbackThinking.meta,
+      }]
+      : [{
       id: "placeholder",
       kind: "placeholder" as const,
       status: "placeholder" as const,
