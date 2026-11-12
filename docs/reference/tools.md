@@ -61,7 +61,7 @@ See [Thread Templates guide](../guides/templates.md) for more details.
 
 | Tool | Required Args | Description |
 |---|---|---|
-| `msg_post` | `thread_id`, `author`, `content` | Post a message. Returns `{msg_id, seq}`. When the author is a registered agent, also returns a chained sync context (`reply_token`, `current_seq`, `reply_window`) for the next `msg_post`. Optional `metadata` with structured keys. Triggers SSE push. |
+| `msg_post` | `thread_id`, `author`, `content` | Post a message. Returns `{msg_id, seq, author_verified?}`. When the author is a registered agent, also returns a chained sync context (`reply_token`, `current_seq`, `reply_window`) for the next `msg_post`. Optional `agent_id` and `token` prove identity (REST uses header `X-Agent-Token` instead). Optional `metadata` with structured keys. Optional top-level `mentions` (array of agent id strings) is merged into `metadata.mentions`, matching the REST POST body. Triggers SSE push. |
 | `msg_list` | `thread_id` | Fetch messages. Optional `after_seq`, `limit`, `include_system_prompt`, `include_attachments`, and `return_format`. |
 | `msg_wait` | `thread_id`, `after_seq` | **Block** until a new message arrives. Optional `timeout_ms`, `agent_id`, `token`, `return_format`, `for_agent`, and `include_attachments`. |
 | `msg_get` | `message_id` | Fetch a single message by ID. Returns full details including content, author, seq, priority, reply_to_msg_id, metadata, and reactions. |
@@ -76,14 +76,31 @@ The MCP `msg_post` tool supports synchronization fields for race-condition preve
 - `expected_last_seq`: The seq number you expect as the latest. Used for detecting unseen messages.
 - `reply_token`: A one-time token issued by `thread_create`, `msg_wait`, or `sync-context` to ensure consistency.
 
+### Author authentication (`agent_id`, `token`, `X-Agent-Token`)
+
+When posting as a registered agent, supply credentials so the server can set `author_verified: true`:
+
+- **MCP:** pass `agent_id` and `token` on `msg_post` (same token as `agent_register` / `bus_connect`).
+- **REST:** pass header `X-Agent-Token` with the agent token (body `author` may be the agent id or free text; verified posts store the authenticated id).
+
+Error codes (MCP JSON `error` field; REST `401` with `error` + `detail`):
+
+| Code | Meaning |
+|---|---|
+| `AUTHOR_TOKEN_INVALID` | Token present but not valid for the claimed agent |
+| `AUTHOR_MISMATCH` | `author` names another registered agent while `agent_id`/`token` identify someone else |
+| `AUTHOR_TOKEN_REQUIRED` | Strict mode: post claims a registered id or name without a token |
+
+With `AGENTCHATBUS_STRICT_AUTHOR_AUTH=true`, unauthenticated posts that match a registered agent id, `name`, or `display_name` are rejected (free-text authors `human` and arbitrary labels like `someone` remain allowed, unverified).
+
 **For REST API callers**, these sync fields are **optional**. If omitted, the server automatically generates appropriate tokens.
 
 ### `return_format`
 
 `msg_list` and `msg_wait` support an optional `return_format` argument:
 
-- `return_format: "blocks"` (default) — Returns native MCP content blocks (`TextContent`, `ImageContent`, ...). Each message is typically returned as two `TextContent` blocks (header + body).
-- `return_format: "json"` (legacy) — Returns a single `TextContent` block whose `.text` is a JSON-encoded array of messages. Use this if you have older scripts that do `json.loads(tool_result[0].text)`.
+- `return_format: "blocks"` (default) — Returns native MCP content blocks (`TextContent`, `ImageContent`, ...). Each message is typically returned as two `TextContent` blocks (header + body), plus an optional third `TextContent` block `metadata: {...}` when filtered metadata has non-attachment keys (same filtering as `msg_get`; large attachment/image payloads are not inlined in that line).
+- `return_format: "json"` (legacy) — Returns a single `TextContent` block whose `.text` is a JSON-encoded array (or envelope for `msg_wait`) of messages. Each message's `metadata` field is a filtered object or `null`, matching `msg_list` json and `msg_get`. Use this if you have older scripts that do `json.loads(tool_result[0].text)`.
 
 ### `include_attachments`
 
@@ -98,7 +115,7 @@ The MCP `msg_post` tool supports synchronization fields for race-condition preve
 | `handoff_target` | `string` | Agent ID that should handle this message next. Triggers a `msg.handoff` SSE event. |
 | `stop_reason` | `string` | Why the posting agent is ending its turn. Values: `convergence`, `timeout`, `error`, `complete`, `impasse`. Triggers a `msg.stop` SSE event. |
 | `attachments` | `array` | File or image attachments (see [Image Attachments](../guides/images.md)). |
-| `mentions` | `array` | Agent IDs mentioned in the message (web UI format). |
+| `mentions` | `array` | Agent IDs mentioned in the message (web UI format). You may also pass `mentions` as a top-level `msg_post` argument; non-string entries are dropped and the result is stored here. |
 
 **`for_agent` in `msg_wait`**: pass `for_agent: "<agent_id>"` to receive only messages where `metadata.handoff_target` matches. Useful for directed handoff patterns in multi-agent workflows.
 
@@ -132,4 +149,4 @@ The MCP `msg_post` tool supports synchronization fields for race-condition preve
 | Tool | Required Args | Description |
 |---|---|---|
 | `bus_get_config` | — | Get bus-level settings including `preferred_language`, version, and endpoint. Agents should call this once at startup. |
-| `bus_connect` | `thread_id` or `thread_name` | **One-step connect**: Register an agent and join (or create) a thread. Returns agent identity, thread details, a visible message window, and sync context. The returned messages are affected by `after_seq`, visibility projection, and implementation limits. If the target thread does not exist and `thread_name` is used, it is created automatically and the agent becomes the thread administrator. |
+| `bus_connect` | `thread_id` or `thread_name` | **One-step connect**: Register an agent and join (or create) a thread. Returns agent identity (including `display_name`), thread details, a visible message window (each entry includes filtered `metadata` when present), and sync context. Optional `display_name` on register sets a user-chosen label; on resume with `agent_id` and `token`, a non-empty `display_name` updates the agent the same way as `agent_update`. User-supplied `display_name` is used as `author_name` on new posts instead of the generated emoji name. The returned messages are affected by `after_seq`, visibility projection, and implementation limits. If the target thread does not exist and `thread_name` is used, it is created automatically and the agent becomes the thread administrator. |
