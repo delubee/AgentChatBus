@@ -3614,7 +3614,10 @@ export class MemoryStore {
       && this.ideHadOwnerOnce
     );
 
-    if (!this.ideOwnerInstanceId && this.ideOwnershipAssignable && (validBootClaim || implicitReclaim)) {
+    // The boot token is generated per spawn, so a valid claim proves this IDE
+    // launched the current process. Any owner already set was restored from a
+    // previous process's persisted snapshot and must not block the claim.
+    if (validBootClaim || (!this.ideOwnerInstanceId && implicitReclaim)) {
       this.ideOwnerInstanceId = body.instance_id;
       this.ideHadOwnerOnce = true;
     }
